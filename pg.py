@@ -3,7 +3,7 @@ import numpy as np
 from keras.models import Sequential
 from keras.layers import Dense, Reshape, Flatten
 from keras.optimizers import Adam
-from keras.layers.convolutional import Convolution2D
+from keras.layers.convolutional import Conv2D
 
 
 class PGAgent:
@@ -22,11 +22,11 @@ class PGAgent:
     def _build_model(self):
         model = Sequential()
         model.add(Reshape((1, 80, 80), input_shape=(self.state_size,)))
-        model.add(Convolution2D(32, 6, 6, subsample=(3, 3), border_mode='same',
-                                activation='relu', init='he_uniform'))
+        model.add(Conv2D(32, (6, 6), strides=(3, 3), padding='same',
+                                activation='relu'))
         model.add(Flatten())
-        model.add(Dense(64, activation='relu', init='he_uniform'))
-        model.add(Dense(32, activation='relu', init='he_uniform'))
+        model.add(Dense(64, activation='relu'))
+        model.add(Dense(32, activation='relu'))
         model.add(Dense(self.action_size, activation='softmax'))
         opt = Adam(lr=self.learning_rate)
         model.compile(loss='categorical_crossentropy', optimizer=opt)
@@ -34,7 +34,7 @@ class PGAgent:
 
     def memorize(self, state, action, prob, reward):
         y = np.zeros([self.action_size])
-        y[action] = 1
+        y[action] = 1  # 目标是期望state-value（V(s;\theat)）更大，近似等价于策略函数中对应动作的概率最大；
         self.gradients.append(np.array(y).astype('float32') - prob)
         self.states.append(state)
         self.rewards.append(reward)
@@ -43,7 +43,8 @@ class PGAgent:
         state = state.reshape([1, state.shape[0]])
         aprob = self.model.predict(state, batch_size=1).flatten()
         self.probs.append(aprob)
-        prob = aprob / np.sum(aprob)
+        prob = aprob / np.sum(aprob)  # isn't it stupid
+        test_ =  np.random.choice(self.action_size,1,  p=prob)
         action = np.random.choice(self.action_size, 1, p=prob)[0]
         return action, prob
 
@@ -61,10 +62,15 @@ class PGAgent:
         gradients = np.vstack(self.gradients)
         rewards = np.vstack(self.rewards)
         rewards = self.discount_rewards(rewards)
-        reward = (reward - np.mean(rewards)) / (np.std(rewards) + 1e-7)
+        rewards = (rewards - np.mean(rewards)) / (np.std(rewards) + 1e-7)  # compute the rewards
         gradients *= rewards
         X = np.squeeze(np.vstack([self.states]))
+        # gradients类似理解成目标概率与实际的差距，Y理解成修正的目标概率
+        # 学习率是针对的概率差距的，使用的是交叉熵损失函数，衡量的是实际
+        # 输出（概率）与期望输出（概率）的差距。
+        # 我们没有重写损失函数，而是转换了taget为期望输出概率
         Y = self.probs + self.learning_rate * np.squeeze(np.vstack([gradients]))
+
         self.model.train_on_batch(X, Y)
         self.states, self.probs, self.gradients, self.rewards = [], [], [], []
 
